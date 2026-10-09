@@ -1,0 +1,24 @@
+# 日志文件
+*.log
+*.out
+
+# 编辑器缓存
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 密钥、环境变量
+.env
+*.secret
+*.pem
+*.key
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# Java/Maven产物
+target/
+*.jar
