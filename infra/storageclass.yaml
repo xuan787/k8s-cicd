@@ -1,8 +1,8 @@
 #安装nfs
 dnf install nfs-utils rpcbind
 mkdir /nfs
-chown nobody /nfs
-/nfs *(rw,sync,no_subtree_check)
+chown nobody /nfsdata/share
+/nfsdata/share *(rw,sync,no_subtree_check)
 systemctl enable nfs-server && systemctl start nfs-server
 showmount -e 192.168.10.11
 
