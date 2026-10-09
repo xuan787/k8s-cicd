@@ -1,0 +1,82 @@
+#安装harbor仓库
+kubectl create ns harbor
+helm repo add harbor https://helm.goharbor.io
+helm pull harbor/harbor
+
+
+
+#values.yaml
+# 1、账号密码与密钥，部署前修改
+harborAdminPassword: "Harbor@123456"
+secretKey: "16位随机字符串xxxxxxxxx"  # 必须16字符，加密密钥
+
+database:
+  password: "db@123456"   # 内置postgres数据库密码
+
+# 2、对外访问，使用ingress‑nginx
+expose:
+  type: ingress
+  ingress:
+    hosts:
+      core: harbor.cicd.local
+    className: nginx
+
+externalURL: "https://harbor.cicd.local"
+
+# 3、持久化配置！全部使用我们nfs-client存储类
+persistence:
+  enabled: true
+  resourcePolicy: "keep"  # helm uninstall不删除PVC，保护镜像数据
+  persistentVolumeClaim:
+    registry:   # 存放镜像，最重要
+      storageClass: "nfs-client"
+      accessMode: ReadWriteMany
+      size: 20Gi
+    database:   # postgres数据库，用户、项目信息
+      storageClass: "nfs-client"
+      accessMode: ReadWriteMany
+      size: 10Gi
+    jobservice: # 任务日志
+      storageClass: "nfs-client"
+      accessMode: ReadWriteMany
+      size: 5Gi
+    redis:
+      storageClass: "nfs-client"
+      accessMode: ReadWriteMany
+      size: 5Gi
+
+# 4、组件资源限制
+core:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+registry:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 800m
+      memory: 1Gi
+
+jobservice:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# 5、测试环境关闭trivy镜像扫描，节省资源；生产开启
+trivy:
+  enabled: false
+
+# 6、开启监控指标，可以对接prometheus
+exporter:
+  enabled: true
