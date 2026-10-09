@@ -1,0 +1,28 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: test-claim
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Mi
+  storageClassName: nfs-client
+
+kind: Pod
+apiVersion: v1
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: test-pod
+    image: wangyanglinux/myapp:v1.0
+    volumeMounts:
+    - name: nfs-pvc
+      mountPath: "/usr/local/nginx/html"
+  restartPolicy: "Never"
+  volumes:
+  - name: nfs-pvc
+    persistentVolumeClaim:
+      claimName: test-claim
