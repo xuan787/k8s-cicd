@@ -1,0 +1,158 @@
+pipeline {
+  agent {
+    kubernetes {
+      yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins-agent
+  containers:
+  - name: jnlp
+    image: registry.cn-beijing.aliyuncs.com/wangxiaochun/jenkins-inbound-agent:jdk17
+  - name: builder
+    image: registry.cn-beijing.aliyuncs.com/wangxiaochun/maven:3.9.9-eclipse-temurin-17-alpine
+    command: ['cat']
+    tty: true
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+    volumeMounts:
+    - name: maven-cache
+      mountPath: /root/.m2
+  - name: kaniko
+    image: registry.cn-beijing.aliyuncs.com/wangxiaochun/kaniko-executor:debug
+    command: ['cat']
+    tty: true
+    volumeMounts:
+    - name: docker-config
+      mountPath: /kaniko/.docker/
+  - name: kubectl
+    image: registry.cn-beijing.aliyuncs.com/wangxiaochun/kubectl:v1.35.2
+    command: ['cat']
+    tty: true
+  volumes:
+  - name: docker-config
+    secret:
+      secretName: harbor-secret
+      items:
+      - key: .dockerconfigjson
+        path: config.json
+  - name: maven-cache
+    persistentVolumeClaim:
+      claimName: pvc-maven-cache
+"""
+    }
+  }
+
+  environment {
+    REGISTRY = 'harbor.wang.org/example'
+    IMAGE = 'spring-boot-helloworld'
+  }
+
+  triggers {
+    gitlab(triggerOnPush: true,
+      acceptMergeRequestOnSuccess: true,
+      triggerOnMergeRequest: true,
+      branchFilterType: 'All',
+      addVoteOnMergeRequest: true,
+      secretToken: '62dad2cd1d9ae62686ada8dc4cd0ae66')
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git branch: 'main', credentialsId: 'gitlab-root-password', url: 'http://gitlab.devops.svc/devops/spring-boot-helloworld.git'
+        sh 'hostname;cat /etc/os-release;java -version;git version'
+        sh 'pwd;ls -l'
+      }
+    }
+
+    stage('Unit Test') {
+      steps {
+        container('builder') {
+          sh 'mvn clean test'
+          sh 'hostname;cat /etc/os-release;java -version'
+          sh 'pwd;ls -l'
+        }
+      }
+    }
+
+    stage("SonarQube Analysis") {
+      steps {
+        container('builder') {
+          withSonarQubeEnv('sonarqube-server') {
+            sh 'mvn sonar:sonar'
+          }
+        }
+      }
+    }
+
+    stage("Quality Gate") {
+      steps {
+        container('builder') {
+          timeout(time: 30, unit: 'MINUTES') {
+            waitForQualityGate abortPipeline: true
+          }
+        }
+      }
+    }
+
+    stage('Build Package') {
+      steps {
+        container('builder') {
+          sh 'mvn package -DskipTests'
+          sh 'hostname;cat /etc/os-release;java -version'
+          sh 'pwd;ls -l'
+          sh 'ls -l target'
+        }
+      }
+    }
+
+    stage('Build & Push Image') {
+      steps {
+        container('kaniko') {
+          sh """
+/kaniko/executor \
+--context $WORKSPACE \
+--dockerfile Dockerfile \
+--destination $REGISTRY/$IMAGE:$BUILD_NUMBER \
+--destination $REGISTRY/$IMAGE:latest \
+--cache=true \
+--cache-repo=$REGISTRY/cache \
+--skip-tls-verify \
+--skip-tls-verify-registry harbor.wang.org
+"""
+          sh 'hostname;cat /etc/os-release'
+          sh 'pwd;ls -l'
+        }
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        container('kubectl') {
+          sh '''
+id;pwd;ls -l
+kubectl version --client
+kubectl auth can-i create deployments -n dev
+sed -i "s#__IMAGE__#${REGISTRY}/${IMAGE}:${BUILD_NUMBER}#" kubernetes/02-deployment.yaml
+kubectl apply -f kubernetes/
+'''
+        }
+      }
+    }
+  }
+
+  post {
+    failure {
+      echo '❌ Pipeline failed'
+    }
+    success {
+      echo '✅ Pipeline succeeded'
+    }
+  }
+}
